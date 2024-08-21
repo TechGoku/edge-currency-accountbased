@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- added: (Thorchain) Add Midgard API for transaction queries
+- changed: (Thorchain) Move most Thorchain-specific functionality out of CosmosEngine and into to ThorchainEngine subclass
+
 ## 4.20.0 (2024-08-19)
 
 - added: (Solana) Add new tokens: BSOL, DRIFT, HAWK, JITOSOL, JSOL, JTO, JUP, MIMO, MNGO, MSOL, SOL, USDC.e, WBTC, and WETH
