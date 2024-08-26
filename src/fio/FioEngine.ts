@@ -198,6 +198,18 @@ export class FioEngine extends CurrencyEngine<FioTools, SafeFioWalletInfo> {
       fioAction: async (actionName: string, params: any): Promise<any> => {
         return await this.multicastServers(actionName, params)
       },
+      fetchFioAddresses: async (): Promise<FioAddress[]> => {
+        await this.refreshFioAddresses()
+        return this.otherData.fioAddresses
+      },
+      fetchFioAddressNames: async (): Promise<string[]> => {
+        await this.refreshFioAddresses()
+        return this.otherData.fioAddresses.map(fioAddress => fioAddress.name)
+      },
+      fetchFioDomains: async (): Promise<FioDomain[]> => {
+        await this.refreshFioDomains()
+        return this.otherData.fioDomains
+      },
       getFioAddresses: async (): Promise<FioAddress[]> => {
         return this.otherData.fioAddresses
       },
@@ -939,62 +951,7 @@ export class FioEngine extends CurrencyEngine<FioTools, SafeFioWalletInfo> {
     return res
   }
 
-  // Check all account balance and other relevant info
-  async checkAccountInnerLoop(): Promise<void> {
-    const currencyCode = this.currencyInfo.currencyCode
-
-    // Initialize balance
-    if (
-      typeof this.walletLocalData.totalBalances[currencyCode] === 'undefined'
-    ) {
-      this.updateBalance(currencyCode, '0')
-    }
-
-    // Balance
-    try {
-      const balances = { staked: '0', locked: '0' }
-      let balanceRes: BalanceResponse
-      try {
-        balanceRes = asGetFioBalanceResponse(
-          await this.multicastServers('getFioBalance')
-        )
-      } catch (e: any) {
-        if (e?.json?.message === MAINNET_LOCKS_ERROR) {
-          // This is a fallback query for this chain bug https://fioprotocol.atlassian.net/wiki/spaces/DAO/pages/852688908/2024-02-07+Token+Locking+Issue+on+Unstake
-          // Only the balance of the wallet will be returned and staked amounts will appear as zero until the account is corrected. This can be removed once all affected accounts are fixed.
-          balanceRes = asGetFioBalanceResponse(
-            await this.multicastServers('getCurrencyBalance')
-          )
-          this.log.warn('Returning FIO balance only due to chain bug')
-        } else {
-          throw e
-        }
-      }
-      const { balance, available, staked, srps, roe } = balanceRes
-      const nativeAmount = String(balance)
-      balances.staked = String(staked)
-      balances.locked = sub(nativeAmount, String(available))
-
-      this.otherData.srps = srps
-      this.otherData.stakingRoe = roe
-
-      this.updateBalance(currencyCode, nativeAmount)
-
-      // Update staking status if locked balances changed
-      if (
-        balances.staked !== this.otherData.lockedBalances.staked ||
-        balances.locked !== this.otherData.lockedBalances.locked
-      ) {
-        this.otherData.lockedBalances = balances
-        this.localDataDirty()
-        this.updateStakingStatus()
-      }
-    } catch (e: any) {
-      this.log.warn('checkAccountInnerLoop getFioBalance error: ', e)
-    }
-
-    // Fio Addresses
-    let isChanged = false
+  async refreshFioAddresses(): Promise<boolean> {
     try {
       const result = asGetFioAddress(
         await this.multicastServers('getFioAddresses', {
@@ -1041,16 +998,20 @@ export class FioEngine extends CurrencyEngine<FioTools, SafeFioWalletInfo> {
       }
 
       if (areAddressesChanged) {
-        isChanged = true
         this.otherData.fioAddresses = result.fio_addresses.map(fioAddress => ({
           name: fioAddress.fio_address,
           bundledTxs: fioAddress.remaining_bundled_tx
         }))
+        return true
       }
     } catch (e: any) {
-      this.warn('checkAccountInnerLoop getFioAddresses error: ', e)
+      this.warn('fetchAddresses getFioAddresses error: ', e)
     }
 
+    return false
+  }
+
+  async refreshFioDomains(): Promise<boolean> {
     try {
       // Check domains
       const result = asGetFioDomains(
@@ -1098,18 +1059,76 @@ export class FioEngine extends CurrencyEngine<FioTools, SafeFioWalletInfo> {
       }
 
       if (areDomainsChanged) {
-        isChanged = true
         this.otherData.fioDomains = result.fio_domains.map(fioDomain => ({
           name: fioDomain.fio_domain,
           expiration: fioDomain.expiration,
           isPublic: fioDomain.is_public === 1
         }))
+        return true
       }
     } catch (e: any) {
-      this.warn('checkAccountInnerLoop getFioNames error: ', e)
+      this.warn('fetchDomains getFioDomains error: ', e)
     }
 
-    if (isChanged) this.localDataDirty()
+    return false
+  }
+
+  // Check all account balance and other relevant info
+  async checkAccountInnerLoop(): Promise<void> {
+    const currencyCode = this.currencyInfo.currencyCode
+
+    // Initialize balance
+    if (
+      typeof this.walletLocalData.totalBalances[currencyCode] === 'undefined'
+    ) {
+      this.updateBalance(currencyCode, '0')
+    }
+
+    // Balance
+    try {
+      const balances = { staked: '0', locked: '0' }
+      let balanceRes: BalanceResponse
+      try {
+        balanceRes = asGetFioBalanceResponse(
+          await this.multicastServers('getFioBalance')
+        )
+      } catch (e: any) {
+        if (e?.json?.message === MAINNET_LOCKS_ERROR) {
+          balanceRes = asGetFioBalanceResponse(
+            await this.multicastServers('getCurrencyBalance')
+          )
+          this.log.warn('Returning FIO balance only due to chain bug')
+        } else {
+          throw e
+        }
+      }
+      const { balance, available, staked, srps, roe } = balanceRes
+      const nativeAmount = String(balance)
+      balances.staked = String(staked)
+      balances.locked = sub(nativeAmount, String(available))
+
+      this.otherData.srps = srps
+      this.otherData.stakingRoe = roe
+
+      this.updateBalance(currencyCode, nativeAmount)
+
+      if (
+        balances.staked !== this.otherData.lockedBalances.staked ||
+        balances.locked !== this.otherData.lockedBalances.locked
+      ) {
+        this.otherData.lockedBalances = balances
+        this.localDataDirty()
+        this.updateStakingStatus()
+      }
+    } catch (e: any) {
+      this.log.warn('checkAccountInnerLoop getFioBalance error: ', e)
+    }
+
+    // Fio Addresses and Domains
+    const isAddressChanged = await this.refreshFioAddresses()
+    const isDomainChanged = await this.refreshFioDomains()
+
+    if (isAddressChanged || isDomainChanged) this.localDataDirty()
   }
 
   async fetchEncryptedFioRequests(

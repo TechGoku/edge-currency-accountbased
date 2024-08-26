@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- added: Public FIO fetch fns to return non-cached addresses, names, and domains
 - fixed: Display name COMBO (Ethereum) to Furucombo
 
 ## 4.20.0 (2024-08-19)
