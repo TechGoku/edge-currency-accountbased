@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- fixed: (Solana) Properly validate custom token addresses
 - fixed: Display name COMBO (Ethereum) to Furucombo
 
 ## 4.20.0 (2024-08-19)
